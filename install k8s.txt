@@ -1,0 +1,101 @@
+# install k8s on centos7
+# setup centos
+sudo yum update -y
+
+# set hostname for os
+sudo hostnamectl set-hostname <name>
+
+# Disable swap using user root
+swapoff -a
+sed -i '/swap/d' /etc/fstab
+
+#Disable SELinux
+setenforce 0
+sed -i --follow-symlinks 's/^SELINUX=enforcing/SELINUX=disabled/' /etc/sysconfig/selinux
+
+#Update sysctl settings for Kubernetes networking
+cat >>/etc/sysctl.d/kubernetes.conf<<EOF
+net.bridge.bridge-nf-call-ip6tables = 1
+net.bridge.bridge-nf-call-iptables = 1
+EOF
+sysctl --system
+
+#Open port firewalld
+sudo firewall-cmd --permanent --add-port=6443/tcp
+sudo firewall-cmd --permanent --add-port=2379-2380/tcp
+sudo firewall-cmd --permanent --add-port=10250/tcp
+sudo firewall-cmd --permanent --add-port=10251/tcp
+sudo firewall-cmd --permanent --add-port=10252/tcp
+sudo firewall-cmd --permanent --add-port=10255/tcp
+sudo firewall-cmd --reload
+
+#Install docker
+yum install docker -y
+systemctl enable --now docker
+
+#Install kubelet, kubectl, kubeadm
+cat <<EOF | sudo tee /etc/yum.repos.d/kubernetes.repo
+[kubernetes]
+name=Kubernetes
+baseurl=https://packages.cloud.google.com/yum/repos/kubernetes-el7-\$basearch
+enabled=1
+gpgcheck=1
+gpgkey=https://packages.cloud.google.com/yum/doc/rpm-package-key.gpg
+exclude=kubelet kubeadm kubectl
+EOF
+
+
+yum install -y kubelet kubeadm kubectl --disableexcludes=kubernetes
+systemctl enable --now kubelet
+
+#try kubeadm init if error container runtime then install containerd
+yum install -y yum-utils device-mapper-persistent-data lvm2
+yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+yum install -y containerd.io
+mkdir -p /etc/containerd
+containerd config default > /etc/containerd/config.toml
+systemctl start containerd
+systemctl enable containerd
+
+# init kubeadm
+kubeadm init --apiserver-adviertise-address=<ip apiserver> --pod-netword-cidr=192.168.0.0/16
+
+#Affter init 
+mkdir -p $HOME/.kube
+cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+chown $(id -u):$(id -g) $HOME/.kube/config
+
+#Test 
+kubectl get nodes
+
+#Chek on master node if coreDNS not runing then setup calico or other service network 
+kubectl create -f https://raw.githubusercontent.com/projectcalico/calico/v3.26.1/manifests/tigera-operator.yaml
+curl https://raw.githubusercontent.com/projectcalico/calico/v3.26.1/manifests/custom-resources.yaml -O
+kubectl create -f custom-resources.yaml
+
+#Check all pods is running if oke then setup k8s in centos success
+
+#using token add work node in node master
+
+kubeadm join IP:6443 --token .....
+
+#Install on worker note: docker, kubectl, kubeadm, kubelet same top
+yum install -y kubelet kubeadm kubectl --disableexcludes=kubernetes
+#join it with kubeadm join
+
+#Some code of kubectl
+kubectl cluster-info
+kubectl get nodes
+kubectl get pods
+kubectl get pods --all-namespaces
+kubectl get services
+kubectl get deployments
+kubectl create -f <file.yaml>
+kubectl delete <resource_type> <resource_name>
+kubectl describe <resource_type> <resource_name>
+kubectl logs <pod_name>
+kubectl exec -it <pod_name> -- /bin/bash
+kubectl scale deployment <deployment_name> --replicas=<new_replica_count>
+kubectl port-forward <pod_name> <local_port>:<remote_port>
+kubectl proxy
+
